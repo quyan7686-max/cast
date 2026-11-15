@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Random;
+import java.util.TimeZone;
+import java.util.function.LongSupplier;
 
 public final class FishingEngine {
     public enum State { IDLE, WAITING, BITING }
@@ -26,20 +28,30 @@ public final class FishingEngine {
     private final Listener listener;
     private State state = State.IDLE;
     private CatchResult pending;
-    private double elapsed;
+    private final LongSupplier nanoClock;
+    private long lastUpdateNanos;
+    private long elapsedNanos;
     private double waitSeconds;
     private boolean paused;
     private int roundPeriod;
     private int roundHour;
 
     public FishingEngine(GameProgress progress, Random random, Listener listener) {
+        this(progress, random, listener, System::nanoTime);
+    }
+
+    public FishingEngine(GameProgress progress, Random random, Listener listener, LongSupplier nanoClock) {
         this.progress = progress;
         this.random = random;
         this.listener = listener;
+        this.nanoClock = nanoClock;
+        lastUpdateNanos = nanoClock.getAsLong();
     }
 
     public void press(long now) {
         if (paused) return;
+        // 输入与绘制共享同一时钟。超时续钓后，本次点击不能取消新轮次。
+        if (advance(now)) return;
         if (state == State.IDLE) {
             beginRound(now);
         } else if (state == State.WAITING) {
@@ -54,17 +66,34 @@ public final class FishingEngine {
         }
     }
 
-    public void tick(double deltaSeconds, long now) {
-        if (paused || state == State.IDLE) return;
-        elapsed += Math.max(0, deltaSeconds);
-        if (state == State.WAITING && elapsed >= waitSeconds) {
+    public void tick(long now) {
+        advance(now);
+    }
+
+    private void updateElapsed() {
+        long current = nanoClock.getAsLong();
+        if (!paused && state != State.IDLE) {
+            elapsedNanos += Math.max(0, current - lastUpdateNanos);
+        }
+        lastUpdateNanos = current;
+    }
+
+    private boolean advance(long now) {
+        updateElapsed();
+        refreshWeather(now);
+        if (paused || state == State.IDLE) return false;
+        if (state == State.WAITING && elapsedNanos >= Math.round(waitSeconds * 1_000_000_000L)) {
             state = State.BITING;
-            elapsed = 0;
+            // 咬钩提示实际发出时才启动逃脱计时，不扣除尚未呈现的等待超额时间。
+            elapsedNanos = 0;
             listener.onBite();
-        } else if (state == State.BITING && elapsed >= pending.escapeSeconds) {
+            return true;
+        } else if (state == State.BITING && elapsedNanos >= Math.round(pending.escapeSeconds * 1_000_000_000L)) {
             listener.onEscape();
             beginRound(now);
+            return true;
         }
+        return false;
     }
 
     private void beginRound(long now) {
@@ -77,12 +106,13 @@ public final class FishingEngine {
         double maxWait = progress.raining ? 16 : 20;
         waitSeconds = minWait + random.nextDouble() * (maxWait - minWait);
         pending = generateCatch(progress.sceneIndex, roundPeriod, progress.raining);
-        elapsed = 0;
+        elapsedNanos = 0;
         state = State.WAITING;
     }
 
     public void refreshWeather(long now) {
-        long hourKey = now / 3_600_000L;
+        // 按当地时间整点划分小时键，而非 UTC 整点。
+        long hourKey = (now + TimeZone.getDefault().getOffset(now)) / 3_600_000L;
         if (progress.weatherHour != hourKey) {
             progress.weatherHour = hourKey;
             progress.raining = random.nextDouble() < .30;
@@ -111,12 +141,20 @@ public final class FishingEngine {
                 }
             }
         } else {
-            int roll = random.nextInt(100);
-            species = Catalog.get(34);
-            for (int id = 34; id < 42; id++) {
-                roll -= Catalog.get(id).weights[scene];
+            List<Species> candidates = new ArrayList<>();
+            int totalWeight = 0;
+            for (Species item : Catalog.all()) {
+                if (item.junk && item.weights[scene] > 0) {
+                    candidates.add(item);
+                    totalWeight += item.weights[scene];
+                }
+            }
+            int roll = random.nextInt(totalWeight);
+            species = candidates.get(0);
+            for (Species candidate : candidates) {
+                roll -= candidate.weights[scene];
                 if (roll < 0) {
-                    species = Catalog.get(id);
+                    species = candidate;
                     break;
                 }
             }
@@ -142,21 +180,24 @@ public final class FishingEngine {
         EntryRecord entry = progress.entry(result.species.id, result.shiny);
         int beforeTotal = progress.unlockedCount();
         result.newDiscovery = !entry.unlocked();
-        result.lengthRecord = !entry.unlocked() || result.length > entry.length;
-        result.weightRecord = !entry.unlocked() || result.weight > entry.weight;
+        // 长度/重量新纪录只属于已解锁条目；首次钓获只用“新发现”标记。
+        result.lengthRecord = entry.unlocked() && result.length > entry.length;
+        result.weightRecord = entry.unlocked() && result.weight > entry.weight;
         entry.count++;
         entry.length = Math.max(entry.length, result.length);
         entry.weight = Math.max(entry.weight, result.weight);
-        result.collectionComplete = beforeTotal == 83 && progress.unlockedCount() == 84;
+        result.collectionComplete = beforeTotal == GameProgress.ENTRY_COUNT - 1
+                && progress.unlockedCount() == GameProgress.ENTRY_COUNT;
     }
 
     public void cancelRound() {
         state = State.IDLE;
         pending = null;
-        elapsed = 0;
+        elapsedNanos = 0;
     }
 
     public void changeScene(int index) {
+        if (index < 0 || index >= Catalog.SCENES.length) throw new IllegalArgumentException("Unknown scene: " + index);
         if (index == progress.sceneIndex) return;
         cancelRound();
         progress.sceneIndex = index;
@@ -164,6 +205,8 @@ public final class FishingEngine {
     }
 
     public void setPaused(boolean paused) {
+        // 暂停前尚未绘制的时间仍算有效时间；后台时间不计入本轮。
+        updateElapsed();
         this.paused = paused;
     }
 
@@ -172,7 +215,7 @@ public final class FishingEngine {
     public GameProgress getProgress() { return progress; }
     public CatchResult getPending() { return pending; }
     public double getBiteProgress() {
-        return state == State.BITING ? Math.max(0, 1 - elapsed / pending.escapeSeconds) : 0;
+        return state == State.BITING ? Math.max(0, 1 - elapsedNanos / (pending.escapeSeconds * 1_000_000_000.0)) : 0;
     }
     public int getRoundHour() { return roundHour; }
     public int getRoundPeriod() { return roundPeriod; }

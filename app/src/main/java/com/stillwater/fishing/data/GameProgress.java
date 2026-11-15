@@ -1,7 +1,7 @@
 package com.stillwater.fishing.data;
 
 public final class GameProgress {
-    public static final int ENTRY_COUNT = 84;
+    public static final int ENTRY_COUNT = Catalog.all().size() * 2;
     public final EntryRecord[] entries = new EntryRecord[ENTRY_COUNT];
     public int sceneIndex;
     public long weatherHour = Long.MIN_VALUE;

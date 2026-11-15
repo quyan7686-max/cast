@@ -1,0 +1,120 @@
+STILLWATER / 静水集 — ART ATTRIBUTION
+
+PinkSamurai — Pixel Art: Fishing Pack
+https://pinksamurai.itch.io/assets
+Character, fishing poses, fish and locked silhouettes.
+Commercial use permitted with credit. Do not redistribute as a standalone asset pack.
+
+onepixelmore — Pixel Fishing (free sample)
+https://onepixelmore.itch.io/fishing
+16x16 fish, shrimp, crab, can and hook sprites.
+Commercial/personal use and modification permitted. No standalone redistribution or resale.
+Credit appreciated.
+
+Kenney — Pixel Platformer
+https://kenney.nl/assets/pixel-platformer
+License: CC0 1.0 Universal. Environment tiles and water.
+
+Kenney — Roguelike/RPG Pack
+https://kenney.nl/assets/roguelike-rpg-pack
+License: CC0 1.0 Universal. Junk icons and UI window tiles.
+
+Elthen — 2D Pixel Art Octopus (Small)
+https://elthen.itch.io/2d-pixel-art-octopus-sprites
+Octopus sprite. Commercial and non-commercial game use permitted by the author.
+
+edermunizz — Free Pixel Art Forest
+https://edermunizz.itch.io/free-pixel-art-forest
+Layered forest background. Personal/commercial use and adaptation permitted with credit.
+No standalone redistribution. See the original license included below.
+
+The bundled PNGs are incorporated into this game only. They are not offered as a separate asset pack.
+
+ORIGINAL edermunizz LICENSE
+You can use any asset personally and commercially.
+You can modify/ adapt the asset.
+You must give appropriate credit.
+You can NOT re-distribute the files, no matter how much you modify it, you can use it but not share or re-sell it as an asset.
+*The closest creative commons license is CC BY 4.0, but you cannot re-sell or distribute as an asset.
+
+FAQ:
+Q: Can I use on my free/commercial game?
+A: Yes you can use.
+
+Q: Do I need to credit you?
+A: Yes, credit is only needed on my free assets.
+
+Q: Can I use on my twitch cover?
+A: Yes you can use in anything.
+
+Q: Can I modify this asset?
+A: Yes of course!
+
+Q: Can I redistribute if I change this asset?
+A: No, you can't distibutte this asset in any way, even if you modify.
+
+Q: Can I use in more than one game?
+A: Yes you can use in many games as you like.
+
+
+ORIGINAL onepixelmore LICENSE
+## Pixel Fishing (Sample) ##
+
+
+
+Thank you for downloading Pixel Fishing (Sample) by onepixelmore
+
+
+
+# Contents #
+
+	sprites 				[folder containing individual sprites exported as png files with transparent backgrounds]
+	|
+	|-> atlantic_salmon.png
+	|-> bonefish.png
+	|-> bream.png
+	|-> bucket.png
+	|-> common_carp.png
+	|-> hook.png
+	|-> napoleon_fish.png
+	|-> northern_pike.png
+	|-> perch.png
+	|-> red_crab.png
+	|-> shrimp.png
+	 -> yellow_tang.png
+
+	README.txt
+
+
+
+# Technical #
+
+	Assets are available as individual sprites
+	Sprites use the .png file format with transparent background
+
+	Each Asset		Pixel Resolution
+	Icons			16x16
+
+
+
+# License #
+
+	You can:
+	1. use for commercial and personal use
+	2. modify assets
+
+	You cannot:
+	1. redistribute or resale the assets, even if modified
+	2. use in a crypto, NFT, P2E, or meta-related project
+	3. use to train AI image generators
+	
+	Credit is not required but appreciated
+
+
+
+To note:
+	1. As with pixel art assets, it is recommended to use No Filter/Point Sampling and disabling anti-aliasing for assets to appear as intended in game engines, such as Unreal Engine, Unity, Godot, GameMaker, RPG Maker, Construct 3, Love2D, Phaser, MonoGame, GB Studio, and many others.
+
+
+
+For inquiries, please email: onepixelmore@mail.com
