@@ -30,6 +30,17 @@ public final class FishingView extends View {
     private final FishingEngine engine;
     private final Paint paint = new Paint();
     private final ArtRepository art;
+    private final VisualMotion motion = new VisualMotion();
+    private final RectF panelBounds = new RectF();
+    private final RectF[] sceneCards = new RectF[6];
+    private final RectF thumbnailBounds = new RectF();
+    private RectF pressedButton;
+    private boolean pointerDown;
+    private float pointerX, pointerY;
+    private double panelStarted, messageStarted = -100, sceneStarted = -100;
+    private boolean panelClosing;
+    private int previousScene = -1;
+    private FishingEngine.State drawnState = FishingEngine.State.IDLE;
     private final RectF sceneButton = new RectF(910, 24, 1030, 82);
     private final RectF codexButton = new RectF(1042, 24, 1162, 82);
     private final RectF helpButton = new RectF(1174, 24, 1256, 82);
@@ -55,7 +66,6 @@ public final class FishingView extends View {
     private static final String[] SCENE_DETAILS = {"荷叶 · 芦苇 · 木平台", "树影 · 流水 · 卵石岸", "远山 · 湖面 · 长栈桥", "浅水 · 石块 · 小瀑布", "木桩 · 渔船 · 远处灯", "岩石 · 浪花 · 潮池"};
     private float scale = 1, offsetX, offsetY;
     private CatchResult displayedCatch;
-    private long messageUntil;
     private String escapeMessage = "";
     private int selectedScene;
     private int qualityFilter, unlockFilter;
@@ -73,6 +83,10 @@ public final class FishingView extends View {
             qualityButtons[i] = new RectF(68 + i * 138, 111, 194 + i * 138, 153);
             unlockButtons[i] = new RectF(540 + i * 138, 111, 666 + i * 138, 153);
         }
+        for (int i = 0; i < sceneCards.length; i++) {
+            float x = 140 + (i % 3) * 340, y = 185 + (i / 3) * 170;
+            sceneCards[i] = new RectF(x, y, x + 310, y + 140);
+        }
         setFocusable(true);
         paint.setStrokeCap(Paint.Cap.SQUARE);
         paint.setStrokeJoin(Paint.Join.MITER);
@@ -89,8 +103,13 @@ public final class FishingView extends View {
     }
 
     private void syncPause() {
+        if (!foreground || !windowFocused) {
+            pointerDown = false;
+            pressedButton = null;
+        }
         engine.setPaused(!foreground || !windowFocused || panel != Panel.NONE);
         clockMinute = Long.MIN_VALUE;
+        motion.resetFrame(System.nanoTime());
         if (foreground && windowFocused) postInvalidateOnAnimation();
     }
 
@@ -102,12 +121,15 @@ public final class FishingView extends View {
     }
 
     public void playBiteSound() {
+        motion.bite();
         if (tone != null) tone.startTone(ToneGenerator.TONE_PROP_ACK, 140);
         performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
     }
 
     public void showCatch(CatchResult result) {
         displayedCatch = result;
+        motion.caught();
+        messageStarted = motion.uiSeconds;
         entriesDirty = true;
         catchDimensions = format(result.length) + " cm   ·   " + format(result.weight) + " g";
         StringBuilder marks = new StringBuilder();
@@ -117,22 +139,28 @@ public final class FishingView extends View {
         if (result.collectionComplete) marks.append("  图鉴已集齐");
         catchMarks = marks.toString();
         escapeMessage = "";
-        messageUntil = System.nanoTime() + 1_000_000_000L;
     }
 
     public void showEscape() {
         displayedCatch = null;
+        messageStarted = motion.uiSeconds;
         escapeMessage = "逃脱了";
-        messageUntil = System.nanoTime() + 1_000_000_000L;
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         long now = System.nanoTime();
+        motion.frame(now, foreground && windowFocused, engine.isPaused());
         long wallTime = System.currentTimeMillis();
         engine.tick(wallTime);
         updateClock(wallTime);
+        observeFishingState();
+        if (panelClosing && VisualMotion.progress(motion.uiSeconds, panelStarted, .16) >= 1) {
+            panel = Panel.NONE;
+            panelClosing = false;
+            syncPause();
+        }
         scale = Math.min(getWidth() / W, getHeight() / H);
         offsetX = (getWidth() - W * scale) / 2;
         offsetY = (getHeight() - H * scale) / 2;
@@ -140,20 +168,66 @@ public final class FishingView extends View {
         canvas.save();
         canvas.translate(offsetX, offsetY);
         canvas.scale(scale, scale);
-        float time = (now % 100_000_000_000L) / 1_000_000_000f;
-        art.drawScene(canvas, paint, engine.getProgress().sceneIndex,
-                Catalog.period(clockHour), engine.getProgress().raining, time);
-        art.drawAngler(canvas, paint, engine.getState(), time);
+        drawWorld(canvas);
         drawHeader(canvas);
         drawFishingButton(canvas);
-        drawMessage(canvas, now);
-        if (panel == Panel.SCENES) drawScenes(canvas);
-        else if (panel == Panel.CODEX) drawCodex(canvas);
-        else if (panel == Panel.DETAIL) drawDetail(canvas);
-        else if (panel == Panel.HELP) drawHelp(canvas);
+        drawMessage(canvas);
+        if (panel != Panel.NONE) {
+            float visibility = panelVisibility();
+            paint.setColor(Color.argb((int) (153 * visibility), 16, 31, 37));
+            canvas.drawRect(0, 0, W, H, paint);
+            int layer = canvas.saveLayerAlpha(0, 0, W, H, Math.round(255 * visibility));
+            canvas.translate(0, panelOffset());
+            if (panel == Panel.SCENES) drawScenes(canvas);
+            else if (panel == Panel.CODEX) drawCodex(canvas);
+            else if (panel == Panel.DETAIL) drawDetail(canvas);
+            else if (panel == Panel.HELP) drawHelp(canvas);
+            canvas.restoreToCount(layer);
+        }
         canvas.restore();
         if (foreground && windowFocused) postInvalidateOnAnimation();
     }
+
+    private void observeFishingState() {
+        FishingEngine.State current = engine.getState();
+        if (current == FishingEngine.State.WAITING && drawnState != current) motion.cast();
+        drawnState = current;
+    }
+
+    private void drawWorld(Canvas canvas) {
+        int scene = engine.getProgress().sceneIndex;
+        int period = Catalog.period(clockHour);
+        boolean rain = engine.getProgress().raining;
+        float blend = VisualMotion.easeOut(VisualMotion.progress(motion.uiSeconds, sceneStarted, .45));
+        if (previousScene >= 0 && blend < 1) {
+            art.drawScene(canvas, paint, previousScene, period, rain, motion.waterSeconds);
+            int layer = canvas.saveLayerAlpha(0, 0, W, H, Math.round(blend * 255));
+            art.drawScene(canvas, paint, scene, period, rain, motion.waterSeconds);
+            canvas.restoreToCount(layer);
+        } else {
+            art.drawScene(canvas, paint, scene, period, rain, motion.waterSeconds);
+        }
+        art.drawAngler(canvas, paint, engine.getState(), motion.waterSeconds,
+                motion.waterSeconds - motion.castAt, motion.waterSeconds - motion.biteAt,
+                motion.waterSeconds - motion.catchAt);
+        float catchProgress = VisualMotion.progress(motion.waterSeconds, motion.catchAt, .55);
+        if (displayedCatch != null && catchProgress < 1) {
+            float p = VisualMotion.easeOut(catchProgress);
+            float x = ArtRepository.FLOAT_X - 325 * p;
+            float y = ArtRepository.FLOAT_Y - 115 * p - 90 * (float) Math.sin(p * Math.PI);
+            int layer = canvas.saveLayerAlpha(330, 270, 800, 600, Math.round(255 * (1 - catchProgress)));
+            canvas.rotate(-16 * p, x, y);
+            art.drawSpecimen(canvas, paint, displayedCatch.species, displayedCatch.shiny, false, x, y, .65f);
+            canvas.restoreToCount(layer);
+        }
+    }
+
+    private float panelVisibility() {
+        float p = VisualMotion.progress(motion.uiSeconds, panelStarted, panelClosing ? .16 : .22);
+        return panelClosing ? 1 - VisualMotion.easeOut(p) : VisualMotion.easeOut(p);
+    }
+
+    private float panelOffset() { return 14 * (1 - panelVisibility()); }
 
     private void updateClock(long now) {
         long minute = Math.floorDiv(now, 60_000L);
@@ -183,6 +257,13 @@ public final class FishingView extends View {
     private void drawFishingButton(Canvas c) {
         boolean biting = engine.getState() == FishingEngine.State.BITING;
         if (biting) {
+            float pulse = .5f + .5f * (float) Math.sin((motion.waterSeconds - motion.biteAt) * 8);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(3);
+            paint.setColor(Color.argb(45 + (int) (70 * pulse), 249, 211, 125));
+            float spread = 4 + pulse * 8;
+            c.drawOval(fishButton.left - spread, fishButton.top - spread,
+                    fishButton.right + spread, fishButton.bottom + spread, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(8);
             paint.setColor(0x44312626);
@@ -191,17 +272,35 @@ public final class FishingView extends View {
             c.drawArc(fishButton, -90, 360 * (float) engine.getBiteProgress(), false, paint);
             paint.setStyle(Paint.Style.FILL);
         }
+        c.save();
+        float press = isPressed(fishButton) ? .95f : 1;
+        c.scale(press, press, fishBody.centerX(), fishBody.centerY());
+        if (isPressed(fishButton)) c.translate(0, 3);
         RectF body = fishBody;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0x44202E2F);
+        c.drawRect(body.left + 3, body.top + 6, body.right + 3, body.bottom + 6, paint);
         art.drawPanel(c, paint, body, biting ? "gold" : "slot");
         text(c, engine.getState() == FishingEngine.State.IDLE ? "抛竿" : "收竿",
                 body.centerX(), body.centerY() + 12, 34, 0xFF19343A, true, Paint.Align.CENTER);
+        c.restore();
         String hint = engine.getState() == FishingEngine.State.IDLE ? "静候一处好水" :
                 biting ? "就是现在" : "浮漂轻动，耐心等候";
         text(c, hint, 1115, 530, 17, biting ? 0xFFFFF0B2 : 0xFFF1F3DE, true, Paint.Align.CENTER);
     }
 
-    private void drawMessage(Canvas c, long now) {
-        if (now >= messageUntil) return;
+    private void drawMessage(Canvas c) {
+        float progress = VisualMotion.progress(motion.uiSeconds, messageStarted, 1);
+        if (progress >= 1) return;
+        float opacity = VisualMotion.envelope(progress, .12f, .18f);
+        int layer = c.saveLayerAlpha(360, 70, 920, 285, Math.round(opacity * 255));
+        float lift = 12 * (1 - VisualMotion.easeOut(Math.min(1, progress / .18f)));
+        c.translate(0, lift - 8 * Math.max(0, (progress - .82f) / .18f));
+        drawMessageContent(c);
+        c.restoreToCount(layer);
+    }
+
+    private void drawMessageContent(Canvas c) {
         if (displayedCatch == null) {
             panel(c, 490, 100, 790, 156, 0xE7193034);
             text(c, escapeMessage, 640, 140, 23, 0xFFF2EADA, true, Paint.Align.CENTER);
@@ -209,7 +308,10 @@ public final class FishingView extends View {
         }
         CatchResult result = displayedCatch;
         panel(c, 390, 92, 890, 259, 0xF31B3439);
+        paint.setColor(result.shiny ? 0x665D5739 : 0x66496359);
+        c.drawRect(419, 111, 531, 223, paint);
         art.drawSpecimen(c, paint, result.species, result.shiny, false, 475, 167, .85f);
+        if (result.shiny || result.newDiscovery) art.drawSparkles(c, paint, 475, 167, 52, motion.uiSeconds);
         text(c, result.species.name, 560, 139, 30, 0xFFF9EFD9, true);
         text(c, result.qualityText(), 560, 169, 18, result.shiny ? 0xFFFFD477 : 0xFFB8D4C7, true);
         text(c, catchDimensions,
@@ -218,7 +320,6 @@ public final class FishingView extends View {
     }
 
     private void drawScenes(Canvas c) {
-        shade(c);
         panel(c, 100, 65, 1180, 665, 0xF5EEE8DA);
         text(c, "选择一处水域", 140, 119, 32, 0xFF19343A, true);
         text(c, "切换场景会结束当前钓鱼；仅查看不会影响本轮", 140, 151, 17, 0xFF60746E, false);
@@ -227,8 +328,13 @@ public final class FishingView extends View {
             float x = 140 + (i % 3) * 340;
             float y = 185 + (i / 3) * 170;
             boolean selected = selectedScene == i;
-            art.drawPanel(c, paint, new RectF(x, y, x + 310, y + 140), selected ? "dark" : "slot");
-            art.drawSceneThumbnail(c, paint, i, new RectF(x + 5, y + 5, x + 116, y + 135));
+            art.drawPanel(c, paint, sceneCards[i], selected ? "dark" : "slot");
+            thumbnailBounds.set(x + 7, y + 7, x + 116, y + 133);
+            art.drawSceneThumbnail(c, paint, i, thumbnailBounds);
+            if (selected) {
+                paint.setColor(0xFFE5BA69);
+                c.drawRect(x + 123, y + 10, x + 181, y + 13, paint);
+            }
             text(c, Catalog.SCENES[i], x + 123, y + 58, 25, selected ? 0xFFFFF1D5 : 0xFF24433F, true);
             String detail = SCENE_DETAILS[i];
             text(c, detail, x + 123, y + 91, 15, selected ? 0xFFC6D8C9 : 0xFF657970, false);
@@ -239,11 +345,14 @@ public final class FishingView extends View {
     }
 
     private void drawCodex(Canvas c) {
-        shade(c);
         panel(c, 38, 38, 1242, 692, 0xFAF3EBDD);
         text(c, "水岸图鉴", 68, 87, 31, 0xFF19343A, true);
         text(c, "已解锁  " + engine.getProgress().unlockedCount() + " / " + GameProgress.ENTRY_COUNT, 315, 85, 20, 0xFF597168, true);
         close(c);
+        paint.setColor(0xFFD2D8C6);
+        c.drawRect(315, 96, 535, 100, paint);
+        paint.setColor(0xFF6D9279);
+        c.drawRect(315, 96, 315 + 220f * engine.getProgress().unlockedCount() / GameProgress.ENTRY_COUNT, 100, paint);
         for (int i = 0; i < 3; i++) {
             button(c, qualityButtons[i], QUALITIES[i], qualityFilter == i);
             button(c, unlockButtons[i], UNLOCKS[i], unlockFilter == i);
@@ -260,6 +369,16 @@ public final class FishingView extends View {
             drawEntryCell(c, entries.get(index), x, CodexLayout.cellY(index, codexScroll));
         }
         c.restore();
+        float contentHeight = ((entries.size() + 3) / 4) * CodexLayout.ROW_HEIGHT;
+        if (contentHeight > CodexLayout.HEIGHT) {
+            float thumbHeight = CodexLayout.HEIGHT * CodexLayout.HEIGHT / contentHeight;
+            float thumbTop = CodexLayout.TOP + codexScroll / (contentHeight - CodexLayout.HEIGHT)
+                    * (CodexLayout.HEIGHT - thumbHeight);
+            paint.setColor(0xFFD4D9C9);
+            c.drawRect(1229, CodexLayout.TOP, 1233, CodexLayout.TOP + CodexLayout.HEIGHT, paint);
+            paint.setColor(0xFF789582);
+            c.drawRect(1229, thumbTop, 1233, thumbTop + thumbHeight, paint);
+        }
         if (entries.isEmpty()) text(c, "没有符合筛选条件的条目", 640, 385, 22, 0xFF72867D, false, Paint.Align.CENTER);
         text(c, "上下滑动浏览 · 点击条目查看详情", 75, 677, 15, 0xFF718279, false);
         text(c, (entries.isEmpty() ? "0 / 0 项" : (first + 1) + "—" + end + " / " + entries.size() + " 项"),
@@ -270,7 +389,12 @@ public final class FishingView extends View {
         Species species = Catalog.get(entryIndex / 2);
         boolean shiny = entryIndex % 2 == 1;
         EntryRecord record = engine.getProgress().entries[entryIndex];
-        art.drawPanel(c, paint, new RectF(x, y, x + 276, y + 104), "slot");
+        panelBounds.set(x, y, x + 276, y + 104);
+        art.drawPanel(c, paint, panelBounds, "slot");
+        if (record.unlocked() && shiny) {
+            paint.setColor(0xFFD2AA5F);
+            c.drawRect(x + 8, y + 16, x + 11, y + 88, paint);
+        }
         art.drawSpecimen(c, paint, species, shiny, !record.unlocked(), x + 54, y + 51, .48f);
         text(c, record.unlocked() ? species.name : "尚未发现", x + 108, y + 38, 20,
                 record.unlocked() ? 0xFF25433E : 0xFF849087, true);
@@ -303,7 +427,9 @@ public final class FishingView extends View {
         text(c, "图鉴条目  " + String.format(Locale.CHINA, "%02d", selectedEntry + 1), 220, 129, 16, 0xFF718279, true);
         close(c);
         panel(c, 220, 160, 565, 515, 0xFFDDE6D8);
-        art.drawSpecimen(c, paint, species, shiny, !record.unlocked(), 393, 330, 1.65f);
+        float floatY = record.unlocked() ? (float) Math.sin(motion.uiSeconds * 1.8) * 3 : 0;
+        art.drawSpecimen(c, paint, species, shiny, !record.unlocked(), 393, 330 + floatY, 1.65f);
+        if (shiny && record.unlocked()) art.drawSparkles(c, paint, 393, 330, 105, motion.uiSeconds);
         text(c, shiny ? "闪光品质" : "普通品质", 393, 477, 20, shiny ? 0xFF9B702D : 0xFF4D6C61, true, Paint.Align.CENTER);
         text(c, record.unlocked() ? species.name : "尚未发现", 615, 201, 34, 0xFF203E39, true);
         text(c, "出现场景", 615, 259, 16, 0xFF7B887B, true);
@@ -320,7 +446,6 @@ public final class FishingView extends View {
     }
 
     private void drawHelp(Canvas c) {
-        shade(c);
         panel(c, 250, 90, 1030, 640, 0xFAF1E8D9);
         text(c, "留一点时间给水", 295, 145, 32, 0xFF1F403B, true);
         close(c);
@@ -350,14 +475,49 @@ public final class FishingView extends View {
     private void panel(Canvas c, float l, float t, float r, float b, int color) {
         int red = (color >> 16) & 0xff, green = (color >> 8) & 0xff, blue = color & 0xff;
         String style = (red + green + blue) / 3 > 145 ? "slot" : "dark";
-        art.drawPanel(c, paint, new RectF(l, t, r, b), style);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0x33101F25);
+        c.drawRect(l + 4, t + 6, r + 4, b + 6, paint);
+        panelBounds.set(l, t, r, b);
+        art.drawPanel(c, paint, panelBounds, style);
     }
 
     private void button(Canvas c, RectF rect, String label, boolean accent) {
+        c.save();
+        if (isPressed(rect)) {
+            c.scale(.97f, .97f, rect.centerX(), rect.centerY());
+            c.translate(0, 2);
+        }
         art.drawPanel(c, paint, rect, accent ? "gold" : "dark");
         float size = rect.width() < 90 ? 26 : rect.width() < 150 ? 16 : 19;
         text(c, label, rect.centerX(), rect.centerY() + size * .35f, size,
                 accent ? 0xFF1A3637 : 0xFFF1EBD8, true, Paint.Align.CENTER);
+        c.restore();
+    }
+
+    private boolean isPressed(RectF rect) {
+        return pointerDown && pressedButton == rect && rect.contains(pointerX, pointerY);
+    }
+
+    private RectF buttonAt(float x, float y) {
+        if (panel == Panel.NONE) {
+            if (fishButton.contains(x, y)) return fishButton;
+            if (sceneButton.contains(x, y)) return sceneButton;
+            if (codexButton.contains(x, y)) return codexButton;
+            if (helpButton.contains(x, y)) return helpButton;
+        } else {
+            if (closeButton.contains(x, y)) return closeButton;
+            if (panel == Panel.SCENES) {
+                if (confirmSceneButton.contains(x, y)) return confirmSceneButton;
+                if (continueButton.contains(x, y)) return continueButton;
+            } else if (panel == Panel.CODEX) {
+                for (int i = 0; i < 3; i++) {
+                    if (qualityButtons[i].contains(x, y)) return qualityButtons[i];
+                    if (unlockButtons[i].contains(x, y)) return unlockButtons[i];
+                }
+            } else if (panel == Panel.DETAIL && returnCodexButton.contains(x, y)) return returnCodexButton;
+        }
+        return null;
     }
 
     private void text(Canvas c, String value, float x, float y, float size, int color, boolean bold) {
@@ -398,6 +558,22 @@ public final class FishingView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         float x = (event.getX() - offsetX) / scale;
         float y = (event.getY() - offsetY) / scale;
+        if (panelClosing) return true;
+        if (panel != Panel.NONE) y -= panelOffset();
+        pointerX = x;
+        pointerY = y;
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            pointerDown = true;
+            pressedButton = buttonAt(x, y);
+        } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            pointerDown = false;
+            pressedButton = null;
+            scrolling = false;
+            return true;
+        } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+            pointerDown = false;
+            pressedButton = null;
+        }
         if (panel == Panel.CODEX) {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 touchY = y;
@@ -431,6 +607,7 @@ public final class FishingView extends View {
             else if (fishButton.contains(x, y)) {
                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                 engine.press(System.currentTimeMillis());
+                observeFishingState();
             }
         } else if (panel == Panel.HELP) {
             if (closeButton.contains(x, y)) openPanel(Panel.NONE);
@@ -439,12 +616,15 @@ public final class FishingView extends View {
                 selectedScene = engine.getProgress().sceneIndex;
                 openPanel(Panel.NONE);
             } else if (confirmSceneButton.contains(x, y)) {
-                engine.changeScene(selectedScene);
+                if (selectedScene != engine.getProgress().sceneIndex) {
+                    previousScene = engine.getProgress().sceneIndex;
+                    sceneStarted = motion.uiSeconds;
+                    engine.changeScene(selectedScene);
+                }
                 openPanel(Panel.NONE);
             } else {
                 for (int i = 0; i < 6; i++) {
-                    float left = 140 + (i % 3) * 340, top = 185 + (i / 3) * 170;
-                    if (new RectF(left, top, left + 310, top + 140).contains(x, y)) selectedScene = i;
+                    if (sceneCards[i].contains(x, y)) selectedScene = i;
                 }
             }
         } else if (panel == Panel.CODEX) {
@@ -473,15 +653,24 @@ public final class FishingView extends View {
         } else if (panel == Panel.DETAIL) {
             if (closeButton.contains(x, y)) openPanel(Panel.NONE);
             else if (returnCodexButton.contains(x, y)) {
-                panel = Panel.CODEX;
-                syncPause();
+                openPanel(Panel.CODEX);
             }
         }
         return true;
     }
 
     private void openPanel(Panel next) {
-        panel = next;
+        pointerDown = false;
+        pressedButton = null;
+        panelStarted = motion.uiSeconds;
+        panelClosing = next == Panel.NONE;
+        if (!panelClosing) {
+            panel = next;
+            if (next == Panel.DETAIL) closeButton.set(1002, 102, 1060, 156);
+            else if (next == Panel.HELP) closeButton.set(928, 110, 986, 164);
+            else if (next == Panel.SCENES) closeButton.set(1090, 83, 1148, 137);
+            else closeButton.set(1152, 70, 1210, 124);
+        }
         if (next == Panel.CODEX) entriesDirty = true;
         syncPause();
     }
