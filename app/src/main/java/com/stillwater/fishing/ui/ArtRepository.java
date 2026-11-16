@@ -8,6 +8,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
 
@@ -26,7 +28,9 @@ public final class ArtRepository {
     private final Map<String, Bitmap> bitmaps = new HashMap<>();
     private final Path fishingLine = new Path();
     private final String[] sceneNames = new String[6];
-    private final String[][] specimenNames = new String[com.stillwater.fishing.data.GameProgress.ENTRY_COUNT / 2][3];
+    private final String[][] specimenNames = new String[com.stillwater.fishing.data.GameProgress.ENTRY_COUNT / 2][2];
+    private final PorterDuffColorFilter silhouetteFilter = new PorterDuffColorFilter(
+            Color.rgb(29, 49, 54), PorterDuff.Mode.SRC_IN);
     private final Rect source = new Rect();
     private final RectF destination = new RectF();
 
@@ -37,7 +41,6 @@ public final class ArtRepository {
             String base = String.format(Locale.US, "species_%02d", i);
             specimenNames[i][0] = base;
             specimenNames[i][1] = base + "_s";
-            specimenNames[i][2] = base + "_l";
         }
         // Decode action artwork before the first cast, keeping feedback frames lightweight.
         bitmap("angler_idle");
@@ -86,6 +89,7 @@ public final class ArtRepository {
         canvas.drawRect(destination, paint);
         if (period == 3) drawStars(canvas, paint, time);
         drawWaterHighlights(canvas, paint, period, time);
+        drawAmbient(canvas, paint, scene, period, time);
         if (raining) drawRain(canvas, paint, time);
     }
 
@@ -109,6 +113,47 @@ public final class ArtRepository {
             int alpha = (period == 3 ? 12 : 18) + (int) (24 * (.5 + .5 * Math.sin(phase)));
             paint.setColor(Color.argb(alpha, 224, 240, 218));
             canvas.drawRect(Math.round(x / 2) * 2, y, Math.round((x + width) / 2) * 2, y + 2, paint);
+        }
+    }
+
+    private void drawAmbient(Canvas canvas, Paint paint, int scene, int period, double time) {
+        if (period == 0) {
+            // Thin dawn mist drifts horizontally without hiding the float.
+            for (int i = 0; i < 6; i++) {
+                double phase = time * .16 + i * 1.7;
+                float x = 360 + (float) Math.sin(phase) * 55 + i * 107;
+                float y = 430 + i * 29;
+                paint.setColor(Color.argb(9 + i % 3 * 3, 238, 226, 198));
+                canvas.drawRect(x, y, x + 115 + i * 13, y + 5, paint);
+            }
+        } else if (period == 2) {
+            // Broken warm reflections are confined to open water.
+            for (int i = 0; i < 10; i++) {
+                double phase = time * .7 + i * 1.9;
+                float x = 730 + (i * 67) % 410 + (float) Math.sin(phase) * 12;
+                float y = 470 + i * 19;
+                paint.setColor(Color.argb(18 + (int) (20 * (.5 + .5 * Math.sin(phase))), 247, 190, 112));
+                canvas.drawRect(x, y, x + 24 + (i % 3) * 11, y + 3, paint);
+            }
+        } else if (period == 3 && scene <= 3) {
+            // Freshwater fireflies use sparse, slow pulses rather than constant flashing.
+            for (int i = 0; i < 11; i++) {
+                double phase = time * .65 + i * 2.3;
+                float x = 335 + (i * 109) % 790 + (float) Math.sin(phase) * 13;
+                float y = 290 + (i * 47) % 210 + (float) Math.cos(phase * .8) * 9;
+                int alpha = (int) (75 * Math.max(0, Math.sin(phase)));
+                paint.setColor(Color.argb(alpha, 244, 211, 119));
+                canvas.drawRect(x - 2, y - 2, x + 2, y + 2, paint);
+            }
+        }
+        if (scene == 5) {
+            for (int i = 0; i < 7; i++) {
+                double phase = time * .55 + i * .8;
+                float x = 430 + i * 112 + (float) Math.sin(phase) * 16;
+                float y = 565 + (i % 3) * 35;
+                paint.setColor(Color.argb(22 + (int) (20 * (.5 + .5 * Math.sin(phase))), 224, 239, 218));
+                canvas.drawRect(x, y, x + 45, y + 3, paint);
+            }
         }
     }
 
@@ -229,10 +274,12 @@ public final class ArtRepository {
     public void drawSpecimen(Canvas canvas, Paint paint, Species species, boolean shiny,
                              boolean silhouette, float centerX, float centerY, float scale) {
         prepare(paint);
-        String name = specimenNames[species.id][silhouette ? 2 : shiny ? 1 : 0];
+        String name = specimenNames[species.id][!silhouette && shiny ? 1 : 0];
         float size = 96 * scale;
         destination.set(centerX - size / 2, centerY - size / 2, centerX + size / 2, centerY + size / 2);
+        if (silhouette) paint.setColorFilter(silhouetteFilter);
         canvas.drawBitmap(bitmap(name), null, destination, paint);
+        paint.setColorFilter(null);
     }
 
     public void drawSceneThumbnail(Canvas canvas, Paint paint, int scene, RectF target) {

@@ -1,0 +1,84 @@
+<resources>
+    <string name="app_name">静水集</string>
+    <string name="action_scenes">场景</string>
+    <string name="action_codex">图鉴 %1$d/%2$d</string>
+    <string name="action_help">?</string>
+    <string name="action_cast">抛竿</string>
+    <string name="action_reel">收竿</string>
+    <string name="action_close">×</string>
+    <string name="action_continue_fishing">继续钓鱼</string>
+    <string name="action_go_scene">前往%1$s</string>
+    <string name="action_return_codex">返回图鉴</string>
+    <string name="tagline">慢下来，等一尾鱼</string>
+    <string name="hint_idle">静候一处好水</string>
+    <string name="hint_biting">就是现在</string>
+    <string name="hint_waiting">浮漂轻动，耐心等候</string>
+    <string name="weather_rain">雨</string>
+    <string name="weather_clear">晴</string>
+    <string name="quality_normal">普通</string>
+    <string name="quality_shiny">闪光</string>
+    <string name="quality_normal_full">普通品质</string>
+    <string name="quality_shiny_full">闪光品质</string>
+    <string name="mark_discovery">新发现</string>
+    <string name="mark_length_record">长度新纪录</string>
+    <string name="mark_weight_record">重量新纪录</string>
+    <string name="mark_collection_complete">图鉴已集齐</string>
+    <string name="message_escaped">逃脱了</string>
+    <string name="scene_picker_title">选择一处水域</string>
+    <string name="scene_picker_description">切换场景会结束当前钓鱼；仅查看不会影响本轮</string>
+    <string name="scene_current">当前</string>
+    <string name="codex_title">水岸图鉴</string>
+    <string name="codex_unlocked">已解锁  %1$d / %2$d</string>
+    <string name="codex_empty">没有符合筛选条件的条目</string>
+    <string name="codex_scroll_hint">上下滑动浏览 · 点击条目查看详情</string>
+    <string name="codex_empty_range">0 / 0 项</string>
+    <string name="codex_range">%1$d—%2$d / %3$d 项</string>
+    <string name="entry_undiscovered">尚未发现</string>
+    <string name="entry_catch_count">钓上 %1$d 次</string>
+    <string name="entry_number">图鉴条目  %1$02d</string>
+    <string name="entry_scenes">出现场景</string>
+    <string name="entry_time">出现时间</string>
+    <string name="entry_count">钓上次数</string>
+    <string name="entry_length">长度记录</string>
+    <string name="entry_weight">重量记录</string>
+    <string name="help_title">留一点时间给水</string>
+    <string name="art_credit_primary">美术：PinkSamurai · onepixelmore · Kenney</string>
+    <string name="art_credit_secondary">Elthen · edermunizz｜授权说明已随游戏打包</string>
+    <string name="content_fishing_button">钓鱼按钮</string>
+    <string name="content_scene_button">切换钓鱼场景</string>
+    <string name="content_codex_button">打开图鉴</string>
+    <string name="content_help_button">打开玩法说明</string>
+    <string name="content_close_button">关闭面板</string>
+    <string name="content_main_screen">钓鱼主界面，可抛竿、切换场景、查看图鉴或玩法说明</string>
+    <string name="content_scene_panel">场景选择面板，可切换水域或返回钓鱼主界面</string>
+    <string name="content_codex_panel">水岸图鉴，可筛选条目或选择条目查看详情</string>
+    <string name="content_detail_panel">图鉴条目详情，按返回键回到图鉴</string>
+    <string name="content_help_panel">玩法说明面板，按返回键回到钓鱼主界面</string>
+    <string-array name="quality_filters">
+        <item>全部品质</item>
+        <item>普通</item>
+        <item>闪光</item>
+    </string-array>
+    <string-array name="unlock_filters">
+        <item>全部状态</item>
+        <item>已解锁</item>
+        <item>未解锁</item>
+    </string-array>
+    <string-array name="scene_details">
+        <item>荷叶 · 芦苇 · 木平台</item>
+        <item>树影 · 流水 · 卵石岸</item>
+        <item>远山 · 湖面 · 长栈桥</item>
+        <item>浅水 · 石块 · 小瀑布</item>
+        <item>木桩 · 渔船 · 远处灯</item>
+        <item>岩石 · 浪花 · 潮池</item>
+    </string-array>
+    <string-array name="help_lines">
+        <item>01  点击「抛竿」，等待浮漂下沉。</item>
+        <item>02  浮漂下沉、按钮高亮时，点击「收竿」。</item>
+        <item>03  在圆环消失前收竿即可钓获；超时自动续钓。</item>
+        <item>04  等待时收竿会取消本轮，不会消耗任何收藏。</item>
+        <item>05  图鉴与场景面板会暂停计时，切到后台也一样。</item>
+        <item>06  雨天等待更短，闪光出现率更高。</item>
+        <item>07  每个类目都有普通与闪光两种独立收藏。</item>
+    </string-array>
+</resources>

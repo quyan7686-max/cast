@@ -1,0 +1,20 @@
+{
+  "name": "Rocky coast",
+  "size": [320, 180],
+  "background": {
+    "type": "sky",
+    "top": [145, 184, 190],
+    "bottom": [228, 207, 166]
+  },
+  "layers": [
+    {"name": "water", "type": "water", "y": 94},
+    {"name": "rocky shore", "type": "tile_grid", "tile": 4, "x_range": [0, 83, 18], "y_range": [88, 180, 18]},
+    {"name": "coast rocks", "type": "tiles", "items": [
+      {"tile": 7, "x": 81, "y": 133},
+      {"tile": 7, "x": 106, "y": 148},
+      {"tile": 7, "x": 271, "y": 112},
+      {"tile": 7, "x": 289, "y": 128}
+    ]},
+    {"name": "dock", "type": "dock", "x": 22, "y": 105, "length": 4}
+  ]
+}

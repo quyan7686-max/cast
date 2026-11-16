@@ -1,0 +1,21 @@
+{
+  "name": "Lotus pond",
+  "size": [320, 180],
+  "background": {
+    "type": "forest",
+    "crop": [160, 390, 768, 732],
+    "brightness": 1.55,
+    "color": 1.16
+  },
+  "layers": [
+    {"name": "water", "type": "water", "y": 98},
+    {"name": "left bank", "type": "ground", "y": 98, "width": 72},
+    {"name": "dock", "type": "dock", "x": 36, "y": 104, "length": 6},
+    {"name": "lotus pads", "type": "lotus_pads", "positions": [[152, 127], [211, 145], [265, 114]]},
+    {"name": "reeds", "type": "tiles", "items": [
+      {"tile": 125, "x": 7, "y": 80},
+      {"tile": 124, "x": 24, "y": 80},
+      {"tile": 124, "x": 60, "y": 80}
+    ]}
+  ]
+}

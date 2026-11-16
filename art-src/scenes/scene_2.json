@@ -1,0 +1,20 @@
+{
+  "name": "Open lake",
+  "size": [320, 180],
+  "background": {
+    "type": "sky",
+    "top": [151, 190, 190],
+    "bottom": [222, 218, 177]
+  },
+  "layers": [
+    {"name": "mountain range", "type": "mountains"},
+    {"name": "water", "type": "water", "y": 99},
+    {"name": "left bank", "type": "ground", "y": 105, "width": 51},
+    {"name": "dock", "type": "dock", "x": 18, "y": 103, "length": 10},
+    {"name": "dock posts", "type": "tiles", "items": [
+      {"tile": 90, "x": 17, "y": 121},
+      {"tile": 90, "x": 51, "y": 121},
+      {"tile": 90, "x": 86, "y": 121}
+    ]}
+  ]
+}

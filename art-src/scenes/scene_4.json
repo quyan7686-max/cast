@@ -1,0 +1,38 @@
+{
+  "name": "Harbor dock",
+  "size": [320, 180],
+  "background": {
+    "type": "sky",
+    "top": [140, 172, 181],
+    "bottom": [231, 188, 133]
+  },
+  "layers": [
+    {"name": "harbor skyline", "type": "skyline", "baseline": 86, "buildings": [
+      {"x": 210, "height": 24},
+      {"x": 231, "height": 38},
+      {"x": 254, "height": 29},
+      {"x": 279, "height": 45},
+      {"x": 301, "height": 31}
+    ]},
+    {"name": "water", "type": "water", "y": 94},
+    {"name": "left bank", "type": "ground", "y": 104, "width": 46},
+    {"name": "dock", "type": "dock", "x": 9, "y": 103, "length": 9},
+    {"name": "boat timber and mast", "type": "tiles", "items": [
+      {"tile": 49, "x": 190, "y": 121},
+      {"tile": 49, "x": 208, "y": 121},
+      {"tile": 49, "x": 226, "y": 121},
+      {"tile": 49, "x": 244, "y": 121},
+      {"tile": 49, "x": 262, "y": 121},
+      {"tile": 49, "x": 208, "y": 139},
+      {"tile": 49, "x": 226, "y": 139},
+      {"tile": 49, "x": 244, "y": 139},
+      {"tile": 90, "x": 232, "y": 49},
+      {"tile": 90, "x": 232, "y": 67},
+      {"tile": 90, "x": 232, "y": 85}
+    ]},
+    {"name": "boat sails", "type": "polygons", "items": [
+      {"points": [[242, 55], [242, 102], [280, 102]], "fill": "#e8d8b5"},
+      {"points": [[230, 63], [230, 103], [201, 103]], "fill": "#c5d5c6"}
+    ]}
+  ]
+}

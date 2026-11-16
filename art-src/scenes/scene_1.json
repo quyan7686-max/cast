@@ -1,0 +1,21 @@
+{
+  "name": "Forest river",
+  "size": [320, 180],
+  "background": {
+    "type": "forest",
+    "crop": [160, 390, 768, 732],
+    "brightness": 1.55,
+    "color": 1.16
+  },
+  "layers": [
+    {"name": "water", "type": "water", "y": 108},
+    {"name": "left bank", "type": "ground", "y": 101, "width": 89},
+    {"name": "dock", "type": "dock", "x": 28, "y": 108, "length": 5},
+    {"name": "river rocks", "type": "tiles", "items": [
+      {"tile": 8, "x": 4, "y": 119},
+      {"tile": 7, "x": 53, "y": 132},
+      {"tile": 7, "x": 77, "y": 113},
+      {"tile": 7, "x": 267, "y": 128}
+    ]}
+  ]
+}
