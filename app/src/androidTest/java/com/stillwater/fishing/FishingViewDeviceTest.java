@@ -31,9 +31,23 @@ public final class FishingViewDeviceTest {
 
     @Before
     public void dismissFirstRunImmersiveHint() {
-        if (device.wait(Until.hasObject(By.text("Got it")), 1_000)) {
-            device.findObject(By.text("Got it")).click();
+        if (device.wait(Until.hasObject(By.res("android:id/ok")), 1_000)) {
+            device.findObject(By.res("android:id/ok")).click();
+            device.waitForIdle();
         }
+        awaitWindowFocus();
+    }
+
+    private void awaitWindowFocus() {
+        long deadline = android.os.SystemClock.uptimeMillis() + TIMEOUT_MS;
+        final boolean[] focused = new boolean[1];
+        do {
+            activityRule.getScenario().onActivity(activity ->
+                    focused[0] = activity.findViewById(R.id.fishing_view).hasWindowFocus());
+            if (focused[0]) return;
+            android.os.SystemClock.sleep(50);
+        } while (android.os.SystemClock.uptimeMillis() < deadline);
+        assertTrue("Game window did not gain focus", focused[0]);
     }
 
     @Test
@@ -69,7 +83,12 @@ public final class FishingViewDeviceTest {
     @Test
     public void backFromMainFinishesActivity() {
         device.pressBack();
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        long deadline = android.os.SystemClock.uptimeMillis() + TIMEOUT_MS;
+        while (activityRule.getScenario().getState() != Lifecycle.State.DESTROYED
+                && android.os.SystemClock.uptimeMillis() < deadline) {
+            android.os.SystemClock.sleep(50);
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        }
 
         assertEquals(Lifecycle.State.DESTROYED, activityRule.getScenario().getState());
     }
