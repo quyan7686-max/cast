@@ -48,4 +48,14 @@ public class ViewportTest {
         assertEquals(1280, viewport.toLogicalX(1920), 0);
         assertEquals(720, viewport.toLogicalY(1080), 0);
     }
+
+    @Test public void onlyTallWindowsAskForRotation() {
+        assertTrue("Phone portrait", Viewport.tooNarrow(1080, 2400));
+        assertTrue("Tablet portrait", Viewport.tooNarrow(1600, 2560));
+        assertTrue("Narrow split screen", Viewport.tooNarrow(1080, 1400));
+        assertFalse("Phone landscape", Viewport.tooNarrow(2400, 1080));
+        assertFalse("Square window", Viewport.tooNarrow(1200, 1200));
+        assertFalse("Unfolded foldable", Viewport.tooNarrow(2208, 1840));
+        assertFalse("Thirteen by nine", Viewport.tooNarrow(1280, 720));
+    }
 }

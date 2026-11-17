@@ -1,5 +1,7 @@
 package com.stillwater.fishing.data;
 
+import java.util.Locale;
+
 public final class Species {
     public static final int DAWN = 1, DAY = 2, DUSK = 4, NIGHT = 8;
     public static final int ALL_DAY = 15;
@@ -29,10 +31,23 @@ public final class Species {
 
     public String timeText() {
         if (timeMask == ALL_DAY) return "全天";
-        if (timeMask == (DAWN | DAY)) return "清晨、白天（05:00—17:00）";
-        if (timeMask == (DAWN | DUSK)) return "清晨、黄昏（05:00—08:00；17:00—19:00）";
-        if (timeMask == (DUSK | NIGHT)) return "黄昏、夜晚（17:00—次日05:00）";
-        if (timeMask == NIGHT) return "仅夜晚（19:00—次日05:00）";
+        if (timeMask == (DAWN | DAY)) {
+            return "清晨、白天（" + hour(Catalog.DAWN_START) + "—" + hour(Catalog.DUSK_START) + "）";
+        }
+        if (timeMask == (DAWN | DUSK)) {
+            return "清晨、黄昏（" + hour(Catalog.DAWN_START) + "—" + hour(Catalog.DAY_START)
+                    + "；" + hour(Catalog.DUSK_START) + "—" + hour(Catalog.NIGHT_START) + "）";
+        }
+        if (timeMask == (DUSK | NIGHT)) {
+            return "黄昏、夜晚（" + hour(Catalog.DUSK_START) + "—次日" + hour(Catalog.DAWN_START) + "）";
+        }
+        if (timeMask == NIGHT) {
+            return "仅夜晚（" + hour(Catalog.NIGHT_START) + "—次日" + hour(Catalog.DAWN_START) + "）";
+        }
         return "";
+    }
+
+    private static String hour(int value) {
+        return String.format(Locale.CHINA, "%02d:00", value);
     }
 }

@@ -8,6 +8,8 @@ import static com.stillwater.fishing.data.Species.*;
 
 public final class Catalog {
     public static final String[] SCENES = {"荷塘", "林间河流", "开阔湖泊", "山间溪流", "海港码头", "岩礁海岸"};
+    /** Period boundaries in local hours; the codex text is derived from these, never restated. */
+    public static final int DAWN_START = 5, DAY_START = 8, DUSK_START = 17, NIGHT_START = 19;
     private static final List<Species> ALL = new ArrayList<>();
     private static final List<Species> READ_ONLY = Collections.unmodifiableList(ALL);
     private static final String[] PERIOD_NAMES = {"清晨", "白天", "黄昏", "夜晚"};
@@ -91,9 +93,9 @@ public final class Catalog {
     }
 
     public static int period(int hour) {
-        if (hour >= 5 && hour < 8) return 0;
-        if (hour >= 8 && hour < 17) return 1;
-        if (hour >= 17 && hour < 19) return 2;
+        if (hour >= DAWN_START && hour < DAY_START) return 0;
+        if (hour >= DAY_START && hour < DUSK_START) return 1;
+        if (hour >= DUSK_START && hour < NIGHT_START) return 2;
         return 3;
     }
 

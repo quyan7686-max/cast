@@ -14,6 +14,14 @@ public final class Viewport {
         offsetY = (height - LOGICAL_HEIGHT * scale) / 2;
     }
 
+    /**
+     * A 16:9 scene stays readable once the window is at least as wide as it is tall. Taller
+     * windows (unlocked orientation on Android 16 large screens) get a rotate prompt instead.
+     */
+    public static boolean tooNarrow(float width, float height) {
+        return height > width * 1.15f;
+    }
+
     public float getScale() {
         return scale;
     }

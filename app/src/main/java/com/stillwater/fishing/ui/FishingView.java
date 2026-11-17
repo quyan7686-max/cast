@@ -1,9 +1,11 @@
 package com.stillwater.fishing.ui;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.media.AudioManager;
@@ -11,6 +13,8 @@ import android.media.ToneGenerator;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityNodeProvider;
 
 import com.stillwater.fishing.R;
 import com.stillwater.fishing.data.Catalog;
@@ -28,7 +32,14 @@ import java.util.Locale;
 
 public final class FishingView extends View {
     private static final float W = Viewport.LOGICAL_WIDTH, H = Viewport.LOGICAL_HEIGHT;
+    /** Stable virtual ids shared by hit dispatch and the accessibility node tree. */
+    public static final int ID_CAST = 1, ID_SCENES = 2, ID_CODEX = 3, ID_HELP = 4,
+            ID_CLOSE = 5, ID_CONFIRM_SCENE = 6, ID_CONTINUE = 7, ID_RETURN_CODEX = 8,
+            ID_QUALITY = 10, ID_UNLOCK = 20, ID_SCENE = 30, ID_ENTRY = 100,
+            ID_DETAIL_TEXT = 900, ID_HELP_TEXT = 901;
+    private static final float MIN_TOUCH_DP = 48;
     private final FishingEngine engine;
+    private final FishingAccessibility accessibility = new FishingAccessibility(this);
     private final FishingUiState uiState = new FishingUiState();
     private final Viewport viewport = new Viewport();
     private final Paint paint = new Paint();
@@ -51,10 +62,16 @@ public final class FishingView extends View {
     private final RectF fishButton = new RectF(1030, 548, 1200, 694);
     private final RectF closeButton = new RectF(1152, 70, 1210, 124);
     private boolean foreground, windowFocused = true;
+    private boolean rotatePrompt;
     private long clockMinute = Long.MIN_VALUE;
     private int clockHour;
     private String clockText = "";
     private boolean clockRaining;
+    private int unlockedCount;
+    private String codexLabel = "";
+    private Bitmap codexCache;
+    private final Canvas codexCanvas = new Canvas();
+    private boolean codexDirty = true;
     private String catchDimensions = "", catchMarks = "";
     private final List<Integer> codexEntries = new ArrayList<>();
     private boolean entriesDirty = true;
@@ -72,6 +89,7 @@ public final class FishingView extends View {
     private int selectedScene;
     private float codexScroll, touchY, startScroll;
     private boolean scrolling;
+    private float minTouch = 96;
     private ToneGenerator tone;
 
     public FishingView(Context context, FishingEngine engine) {
@@ -82,6 +100,7 @@ public final class FishingView extends View {
         unlocks = getResources().getStringArray(R.array.unlock_filters);
         sceneDetails = getResources().getStringArray(R.array.scene_details);
         selectedScene = engine.getProgress().sceneIndex;
+        refreshUnlocks();
         for (int i = 0; i < 3; i++) {
             qualityButtons[i] = new RectF(68 + i * 138, 111, 194 + i * 138, 153);
             unlockButtons[i] = new RectF(540 + i * 138, 111, 666 + i * 138, 153);
@@ -105,6 +124,16 @@ public final class FishingView extends View {
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         viewport.update(width, height);
+        // Translate the 48dp minimum target back into logical scene units for the current scale.
+        minTouch = MIN_TOUCH_DP * getResources().getDisplayMetrics().density
+                / Math.max(viewport.getScale(), .001f);
+        boolean taller = Viewport.tooNarrow(width, height);
+        if (taller != rotatePrompt) {
+            rotatePrompt = taller;
+            updateContentDescription(panel());
+            accessibility.rebuild();
+            syncPause();
+        }
     }
 
     public void setForeground(boolean foreground) {
@@ -112,15 +141,22 @@ public final class FishingView extends View {
         syncPause();
     }
 
+    /** Unlock totals only change on a catch, so the HUD must not recount 84 entries every frame. */
+    private void refreshUnlocks() {
+        unlockedCount = engine.getProgress().unlockedCount();
+        codexLabel = getResources().getString(R.string.action_codex,
+                unlockedCount, GameProgress.ENTRY_COUNT);
+    }
+
     private void syncPause() {
         if (!foreground || !windowFocused) {
             pointerDown = false;
             pressedButton = null;
         }
-        engine.setPaused(!foreground || !windowFocused || panel() != Panel.NONE);
+        engine.setPaused(!foreground || !windowFocused || panel() != Panel.NONE || rotatePrompt);
         clockMinute = Long.MIN_VALUE;
         motion.resetFrame(System.nanoTime());
-        if (foreground && windowFocused) postInvalidateOnAnimation();
+        if (foreground && windowFocused && !rotatePrompt) postInvalidateOnAnimation();
     }
 
     @Override
@@ -149,6 +185,8 @@ public final class FishingView extends View {
         if (result.collectionComplete) marks.append("  ").append(getResources().getString(R.string.mark_collection_complete));
         catchMarks = marks.toString();
         escapeMessage = "";
+        refreshUnlocks();
+        accessibility.rebuild();
     }
 
     public void showEscape() {
@@ -169,10 +207,15 @@ public final class FishingView extends View {
         if (panelClosing && VisualMotion.progress(motion.uiSeconds, panelStarted, .16) >= 1) {
             closingPanel = Panel.NONE;
             panelClosing = false;
+            releaseCodexCache();
             syncPause();
         }
         viewport.update(getWidth(), getHeight());
         canvas.drawColor(Color.rgb(12, 29, 35));
+        if (rotatePrompt) {
+            drawRotatePrompt(canvas);
+            return;
+        }
         canvas.save();
         canvas.translate(viewport.getOffsetX(), viewport.getOffsetY());
         canvas.scale(viewport.getScale(), viewport.getScale());
@@ -184,16 +227,45 @@ public final class FishingView extends View {
             float visibility = panelVisibility();
             paint.setColor(Color.argb((int) (153 * visibility), 16, 31, 37));
             canvas.drawRect(0, 0, W, H, paint);
-            int layer = canvas.saveLayerAlpha(0, 0, W, H, Math.round(255 * visibility));
+            // Once the panel is fully opaque the full-screen offscreen layer is pure overhead.
+            // restoreToCount also unwinds the optional layer opened only during the fade.
+            int checkpoint = canvas.save();
+            if (visibility < .999f) {
+                canvas.saveLayerAlpha(0, 0, W, H, Math.round(255 * visibility));
+            }
             canvas.translate(0, panelOffset());
             if (panel() == Panel.SCENES) drawScenes(canvas);
             else if (panel() == Panel.CODEX) drawCodex(canvas);
             else if (panel() == Panel.DETAIL) drawDetail(canvas);
             else if (panel() == Panel.HELP) drawHelp(canvas);
-            canvas.restoreToCount(layer);
+            canvas.restoreToCount(checkpoint);
         }
         canvas.restore();
-        if (foreground && windowFocused) postInvalidateOnAnimation();
+        if (foreground && windowFocused && !rotatePrompt) postInvalidateOnAnimation();
+    }
+
+    /**
+     * Shown when the window is taller than it is wide, which happens once Android 16 ignores the
+     * landscape lock on large screens. Drawn in raw view pixels because the logical scene is too
+     * narrow to stay legible.
+     */
+    private void drawRotatePrompt(Canvas c) {
+        float width = getWidth(), height = getHeight();
+        float unit = Math.min(width, height);
+        float panelWidth = Math.min(width * .82f, unit * 1.25f);
+        float panelHeight = unit * .40f;
+        RectF bounds = new RectF((width - panelWidth) / 2, (height - panelHeight) / 2,
+                (width + panelWidth) / 2, (height + panelHeight) / 2);
+        art.drawPanel(c, paint, bounds, "dark");
+        paint.setColor(0xFFE5BA69);
+        c.drawRect(width / 2 - unit * .04f, bounds.top + unit * .085f,
+                width / 2 + unit * .04f, bounds.top + unit * .085f + Math.max(3, unit * .003f), paint);
+        text(c, getResources().getString(R.string.rotate_title), width / 2,
+                bounds.top + unit * .20f, unit * .055f, 0xFFF9EFD9, true, Paint.Align.CENTER);
+        text(c, getResources().getString(R.string.rotate_hint), width / 2,
+                bounds.top + unit * .275f, unit * .032f, 0xFFB9D3C8, false, Paint.Align.CENTER);
+        text(c, getResources().getString(R.string.rotate_note), width / 2,
+                bounds.top + unit * .345f, unit * .028f, 0xFF7F9A90, false, Paint.Align.CENTER);
     }
 
     private void observeFishingState() {
@@ -264,8 +336,7 @@ public final class FishingView extends View {
         text(c, clockText,
                 640, 60, 20, 0xFFF5EDDA, true, Paint.Align.CENTER);
         button(c, sceneButton, getResources().getString(R.string.action_scenes), false);
-        button(c, codexButton, getResources().getString(R.string.action_codex,
-                engine.getProgress().unlockedCount(), GameProgress.ENTRY_COUNT), false);
+        button(c, codexButton, codexLabel, false);
         button(c, helpButton, getResources().getString(R.string.action_help), false);
     }
 
@@ -365,12 +436,12 @@ public final class FishingView extends View {
         panel(c, 38, 38, 1242, 692, 0xFAF3EBDD);
         text(c, getResources().getString(R.string.codex_title), 68, 87, 31, 0xFF19343A, true);
         text(c, getResources().getString(R.string.codex_unlocked,
-                engine.getProgress().unlockedCount(), GameProgress.ENTRY_COUNT), 315, 85, 20, 0xFF597168, true);
+                unlockedCount, GameProgress.ENTRY_COUNT), 315, 85, 20, 0xFF597168, true);
         close(c);
         paint.setColor(0xFFD2D8C6);
         c.drawRect(315, 96, 535, 100, paint);
         paint.setColor(0xFF6D9279);
-        c.drawRect(315, 96, 315 + 220f * engine.getProgress().unlockedCount() / GameProgress.ENTRY_COUNT, 100, paint);
+        c.drawRect(315, 96, 315 + 220f * unlockedCount / GameProgress.ENTRY_COUNT, 100, paint);
         for (int i = 0; i < 3; i++) {
             button(c, qualityButtons[i], qualities[i], uiState.getQualityFilter() == i);
             button(c, unlockButtons[i], unlocks[i], uiState.getUnlockFilter() == i);
@@ -437,8 +508,31 @@ public final class FishingView extends View {
         return codexEntries;
     }
 
+    /**
+     * The detail panel covers the codex with a translucent shade, so the grid behind it only needs
+     * to be rasterised once per entry instead of on every frame.
+     */
+    private void drawCodexCached(Canvas c) {
+        if (codexCache == null || codexDirty) {
+            if (codexCache == null) {
+                codexCache = Bitmap.createBitmap((int) W, (int) H, Bitmap.Config.ARGB_8888);
+                codexCanvas.setBitmap(codexCache);
+            }
+            codexCache.eraseColor(Color.TRANSPARENT);
+            drawCodex(codexCanvas);
+            codexDirty = false;
+        }
+        c.drawBitmap(codexCache, 0, 0, null);
+    }
+
+    private void releaseCodexCache() {
+        if (codexCache == null) return;
+        codexCache = null;
+        codexCanvas.setBitmap(null);
+    }
+
     private void drawDetail(Canvas c) {
-        drawCodex(c);
+        drawCodexCached(c);
         shade(c);
         panel(c, 180, 82, 1100, 650, 0xFFF6EFDF);
         int selectedEntry = uiState.getSelectedEntry();
@@ -509,28 +603,280 @@ public final class FishingView extends View {
     }
 
     private boolean isPressed(RectF rect) {
-        return pointerDown && pressedButton == rect && rect.contains(pointerX, pointerY);
+        return pointerDown && pressedButton == rect && hit(rect, pointerX, pointerY);
     }
 
+    /** Expands small controls to the 48dp minimum without moving anything on screen. */
+    private boolean hit(RectF rect, float x, float y) {
+        float dx = Math.max(0, (minTouch - rect.width()) / 2);
+        float dy = Math.max(0, (minTouch - rect.height()) / 2);
+        return x >= rect.left - dx && x <= rect.right + dx
+                && y >= rect.top - dy && y <= rect.bottom + dy;
+    }
+
+    /** Single source of truth for hit testing, shared by press feedback and release dispatch. */
     private RectF buttonAt(float x, float y) {
         if (panel() == Panel.NONE) {
-            if (fishButton.contains(x, y)) return fishButton;
-            if (sceneButton.contains(x, y)) return sceneButton;
-            if (codexButton.contains(x, y)) return codexButton;
-            if (helpButton.contains(x, y)) return helpButton;
-        } else {
-            if (closeButton.contains(x, y)) return closeButton;
-            if (panel() == Panel.SCENES) {
-                if (confirmSceneButton.contains(x, y)) return confirmSceneButton;
-                if (continueButton.contains(x, y)) return continueButton;
-            } else if (panel() == Panel.CODEX) {
-                for (int i = 0; i < 3; i++) {
-                    if (qualityButtons[i].contains(x, y)) return qualityButtons[i];
-                    if (unlockButtons[i].contains(x, y)) return unlockButtons[i];
-                }
-            } else if (panel() == Panel.DETAIL && returnCodexButton.contains(x, y)) return returnCodexButton;
+            if (hit(fishButton, x, y)) return fishButton;
+            if (hit(sceneButton, x, y)) return sceneButton;
+            if (hit(codexButton, x, y)) return codexButton;
+            if (hit(helpButton, x, y)) return helpButton;
+            return null;
+        }
+        if (hit(closeButton, x, y)) return closeButton;
+        if (panel() == Panel.SCENES) {
+            if (hit(confirmSceneButton, x, y)) return confirmSceneButton;
+            if (hit(continueButton, x, y)) return continueButton;
+            for (RectF card : sceneCards) {
+                if (hit(card, x, y)) return card;
+            }
+        } else if (panel() == Panel.CODEX) {
+            for (int i = 0; i < 3; i++) {
+                if (hit(qualityButtons[i], x, y)) return qualityButtons[i];
+                if (hit(unlockButtons[i], x, y)) return unlockButtons[i];
+            }
+        } else if (panel() == Panel.DETAIL && hit(returnCodexButton, x, y)) {
+            return returnCodexButton;
         }
         return null;
+    }
+
+    private int idFor(RectF rect) {
+        if (rect == fishButton) return ID_CAST;
+        if (rect == sceneButton) return ID_SCENES;
+        if (rect == codexButton) return ID_CODEX;
+        if (rect == helpButton) return ID_HELP;
+        if (rect == closeButton) return ID_CLOSE;
+        if (rect == confirmSceneButton) return ID_CONFIRM_SCENE;
+        if (rect == continueButton) return ID_CONTINUE;
+        if (rect == returnCodexButton) return ID_RETURN_CODEX;
+        for (int i = 0; i < qualityButtons.length; i++) {
+            if (rect == qualityButtons[i]) return ID_QUALITY + i;
+        }
+        for (int i = 0; i < unlockButtons.length; i++) {
+            if (rect == unlockButtons[i]) return ID_UNLOCK + i;
+        }
+        for (int i = 0; i < sceneCards.length; i++) {
+            if (rect == sceneCards[i]) return ID_SCENE + i;
+        }
+        return 0;
+    }
+
+    /** Runs the action behind a control id, shared by touch and TalkBack activation. */
+    void activate(int id) {
+        Panel current = panel();
+        if (current == Panel.NONE) {
+            if (id == ID_CAST) {
+                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                engine.press(System.currentTimeMillis());
+                observeFishingState();
+            } else if (id == ID_SCENES) openPanel(Panel.SCENES);
+            else if (id == ID_CODEX) openPanel(Panel.CODEX);
+            else if (id == ID_HELP) openPanel(Panel.HELP);
+            return;
+        }
+        if (id == ID_CLOSE) {
+            openPanel(Panel.NONE);
+            return;
+        }
+        if (current == Panel.SCENES) {
+            if (id == ID_CONTINUE) {
+                selectedScene = engine.getProgress().sceneIndex;
+                openPanel(Panel.NONE);
+            } else if (id == ID_CONFIRM_SCENE) {
+                if (selectedScene != engine.getProgress().sceneIndex) {
+                    previousScene = engine.getProgress().sceneIndex;
+                    sceneStarted = motion.uiSeconds;
+                    engine.changeScene(selectedScene);
+                }
+                openPanel(Panel.NONE);
+            } else if (id >= ID_SCENE && id < ID_SCENE + sceneCards.length) {
+                selectedScene = id - ID_SCENE;
+            }
+        } else if (current == Panel.CODEX) {
+            if (id >= ID_QUALITY && id < ID_QUALITY + 3) {
+                uiState.setQualityFilter(id - ID_QUALITY);
+                entriesDirty = true;
+                codexScroll = 0;
+            } else if (id >= ID_UNLOCK && id < ID_UNLOCK + 3) {
+                uiState.setUnlockFilter(id - ID_UNLOCK);
+                entriesDirty = true;
+                codexScroll = 0;
+            } else if (id >= ID_ENTRY && id < ID_ENTRY + GameProgress.ENTRY_COUNT) {
+                uiState.setSelectedEntry(id - ID_ENTRY);
+                openPanel(Panel.DETAIL);
+            }
+        } else if (current == Panel.DETAIL && id == ID_RETURN_CODEX) {
+            openPanel(Panel.CODEX);
+        }
+    }
+
+    @Override
+    public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        return accessibility;
+    }
+
+    /** The system reads the host node from here, so the virtual controls must be attached here. */
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        for (FishingAccessibility.Item item : accessibility.items()) {
+            info.addChild(this, item.id);
+        }
+    }
+
+    @Override
+    public boolean dispatchHoverEvent(MotionEvent event) {
+        return accessibility.dispatchHover(event) || super.dispatchHoverEvent(event);
+    }
+
+    float logicalX(float viewX) {
+        return viewport.toLogicalX(viewX);
+    }
+
+    float logicalY(float viewY) {
+        return viewport.toLogicalY(viewY);
+    }
+
+    Rect screenBoundsOf(RectF logical) {
+        int[] location = new int[2];
+        getLocationOnScreen(location);
+        float scale = viewport.getScale();
+        return new Rect(
+                Math.round(location[0] + viewport.getOffsetX() + logical.left * scale),
+                Math.round(location[1] + viewport.getOffsetY() + logical.top * scale),
+                Math.round(location[0] + viewport.getOffsetX() + logical.right * scale),
+                Math.round(location[1] + viewport.getOffsetY() + logical.bottom * scale));
+    }
+
+    int itemAt(float x, float y) {
+        if (rotatePrompt) return 0;
+        if (panel() != Panel.NONE) y -= panelOffset();
+        RectF hit = buttonAt(x, y);
+        if (hit != null) return idFor(hit);
+        if (panel() == Panel.CODEX) {
+            List<Integer> entries = filteredEntries();
+            int index = CodexLayout.hitTest(x, y, codexScroll, entries.size());
+            if (index >= 0) return ID_ENTRY + entries.get(index);
+        }
+        return 0;
+    }
+
+    List<FishingAccessibility.Item> accessibilityItems() {
+        List<FishingAccessibility.Item> items = new ArrayList<>();
+        if (rotatePrompt) return items;
+        Panel current = panel();
+        float offset = panelOffset();
+        if (current == Panel.NONE) {
+            items.add(accessibilityItem(ID_CAST, castLabel(), fishButton, true, false));
+            items.add(accessibilityItem(ID_SCENES, getResources().getString(R.string.a11y_scenes,
+                    Catalog.SCENES[engine.getProgress().sceneIndex]), sceneButton, true, false));
+            items.add(accessibilityItem(ID_CODEX, getResources().getString(R.string.a11y_codex,
+                    unlockedCount, GameProgress.ENTRY_COUNT), codexButton, true, false));
+            items.add(accessibilityItem(ID_HELP, getResources().getString(R.string.a11y_help),
+                    helpButton, true, false));
+            return items;
+        }
+        items.add(accessibilityItem(ID_CLOSE, getResources().getString(R.string.a11y_close),
+                shifted(closeButton, offset), true, false));
+        if (current == Panel.SCENES) {
+            for (int i = 0; i < sceneCards.length; i++) {
+                String state = i == engine.getProgress().sceneIndex
+                        ? getResources().getString(R.string.a11y_scene_current)
+                        : i == selectedScene
+                        ? getResources().getString(R.string.a11y_scene_selected) : "";
+                String label = state.isEmpty() ? Catalog.SCENES[i]
+                        : getResources().getString(R.string.a11y_scene_card, Catalog.SCENES[i], state);
+                items.add(accessibilityItem(ID_SCENE + i, label, shifted(sceneCards[i], offset),
+                        true, i == selectedScene));
+            }
+            items.add(accessibilityItem(ID_CONFIRM_SCENE, getResources().getString(
+                    R.string.a11y_confirm_scene, Catalog.SCENES[selectedScene]),
+                    shifted(confirmSceneButton, offset), true, false));
+            items.add(accessibilityItem(ID_CONTINUE, getResources().getString(R.string.a11y_continue),
+                    shifted(continueButton, offset), true, false));
+        } else if (current == Panel.CODEX) {
+            for (int i = 0; i < 3; i++) {
+                items.add(accessibilityItem(ID_QUALITY + i, getResources().getString(
+                        R.string.a11y_filter_quality, qualities[i]),
+                        shifted(qualityButtons[i], offset), true, uiState.getQualityFilter() == i));
+            }
+            for (int i = 0; i < 3; i++) {
+                items.add(accessibilityItem(ID_UNLOCK + i, getResources().getString(
+                        R.string.a11y_filter_unlock, unlocks[i]),
+                        shifted(unlockButtons[i], offset), true, uiState.getUnlockFilter() == i));
+            }
+            List<Integer> entries = filteredEntries();
+            int first = CodexLayout.firstVisible(codexScroll);
+            int end = CodexLayout.endVisible(codexScroll, entries.size());
+            for (int position = first; position < end; position++) {
+                int entry = entries.get(position);
+                float x = CodexLayout.LEFT
+                        + (position % CodexLayout.COLUMNS) * CodexLayout.COLUMN_WIDTH;
+                float y = CodexLayout.cellY(position, codexScroll) + offset;
+                items.add(accessibilityItem(ID_ENTRY + entry, entryLabel(entry),
+                        new RectF(x, y, x + CodexLayout.CELL_WIDTH, y + CodexLayout.CELL_HEIGHT),
+                        true, false));
+            }
+        } else if (current == Panel.DETAIL) {
+            items.add(accessibilityItem(ID_RETURN_CODEX,
+                    getResources().getString(R.string.a11y_return_codex),
+                    shifted(returnCodexButton, offset), true, false));
+            items.add(accessibilityItem(ID_DETAIL_TEXT, detailLabel(),
+                    shifted(new RectF(560, 150, 1100, 570), offset), false, false));
+        } else if (current == Panel.HELP) {
+            items.add(accessibilityItem(ID_HELP_TEXT, getResources().getString(
+                    R.string.a11y_help_content,
+                    String.join(" ", getResources().getStringArray(R.array.help_lines))),
+                    shifted(new RectF(250, 175, 1030, 640), offset), false, false));
+        }
+        return items;
+    }
+
+    private static FishingAccessibility.Item accessibilityItem(
+            int id, String label, RectF bounds, boolean clickable, boolean selected) {
+        return new FishingAccessibility.Item(id, label, bounds, clickable, selected);
+    }
+
+    private static RectF shifted(RectF source, float dy) {
+        RectF result = new RectF(source);
+        result.offset(0, dy);
+        return result;
+    }
+
+    private String castLabel() {
+        FishingEngine.State state = engine.getState();
+        int string = state == FishingEngine.State.IDLE ? R.string.a11y_cast
+                : state == FishingEngine.State.BITING ? R.string.a11y_reel_bite : R.string.a11y_reel;
+        return getResources().getString(string);
+    }
+
+    private String entryLabel(int entryIndex) {
+        Species species = Catalog.get(entryIndex / 2);
+        boolean shiny = entryIndex % 2 == 1;
+        String quality = getResources().getString(
+                shiny ? R.string.quality_shiny : R.string.quality_normal);
+        EntryRecord record = engine.getProgress().entries[entryIndex];
+        return record.unlocked()
+                ? getResources().getString(R.string.a11y_entry, species.name, quality, record.count)
+                : getResources().getString(R.string.a11y_entry_locked, quality);
+    }
+
+    private String detailLabel() {
+        int entryIndex = uiState.getSelectedEntry();
+        Species species = Catalog.get(entryIndex / 2);
+        boolean shiny = entryIndex % 2 == 1;
+        EntryRecord record = engine.getProgress().entries[entryIndex];
+        String quality = getResources().getString(
+                shiny ? R.string.quality_shiny : R.string.quality_normal);
+        if (!record.unlocked()) {
+            return getResources().getString(R.string.a11y_entry_locked, quality);
+        }
+        return getResources().getString(R.string.a11y_detail, species.name,
+                getResources().getString(shiny ? R.string.quality_shiny_full
+                        : R.string.quality_normal_full),
+                Catalog.sceneText(species), species.timeText(), record.count,
+                format(record.length), format(record.weight));
     }
 
     private void text(Canvas c, String value, float x, float y, float size, int color, boolean bold) {
@@ -569,6 +915,7 @@ public final class FishingView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (rotatePrompt) return true;
         float x = viewport.toLogicalX(event.getX());
         float y = viewport.toLogicalY(event.getY());
         if (panelClosing) return true;
@@ -613,61 +960,13 @@ public final class FishingView extends View {
         }
         if (event.getAction() != MotionEvent.ACTION_UP) return true;
         performClick();
-        if (panel() == Panel.NONE) {
-            if (sceneButton.contains(x, y)) openPanel(Panel.SCENES);
-            else if (codexButton.contains(x, y)) openPanel(Panel.CODEX);
-            else if (helpButton.contains(x, y)) openPanel(Panel.HELP);
-            else if (fishButton.contains(x, y)) {
-                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-                engine.press(System.currentTimeMillis());
-                observeFishingState();
-            }
-        } else if (panel() == Panel.HELP) {
-            if (closeButton.contains(x, y)) openPanel(Panel.NONE);
-        } else if (panel() == Panel.SCENES) {
-            if (closeButton.contains(x, y) || continueButton.contains(x, y)) {
-                selectedScene = engine.getProgress().sceneIndex;
-                openPanel(Panel.NONE);
-            } else if (confirmSceneButton.contains(x, y)) {
-                if (selectedScene != engine.getProgress().sceneIndex) {
-                    previousScene = engine.getProgress().sceneIndex;
-                    sceneStarted = motion.uiSeconds;
-                    engine.changeScene(selectedScene);
-                }
-                openPanel(Panel.NONE);
-            } else {
-                for (int i = 0; i < 6; i++) {
-                    if (sceneCards[i].contains(x, y)) selectedScene = i;
-                }
-            }
+        RectF hit = buttonAt(x, y);
+        if (hit != null) {
+            activate(idFor(hit));
         } else if (panel() == Panel.CODEX) {
-            if (closeButton.contains(x, y)) {
-                openPanel(Panel.NONE);
-                return true;
-            }
-            for (int i = 0; i < 3; i++) {
-                if (qualityButtons[i].contains(x, y)) {
-                    uiState.setQualityFilter(i);
-                    entriesDirty = true;
-                    codexScroll = 0;
-                }
-                if (unlockButtons[i].contains(x, y)) {
-                    uiState.setUnlockFilter(i);
-                    entriesDirty = true;
-                    codexScroll = 0;
-                }
-            }
             List<Integer> entries = filteredEntries();
-            int hit = CodexLayout.hitTest(x, y, codexScroll, entries.size());
-            if (hit >= 0) {
-                uiState.setSelectedEntry(entries.get(hit));
-                openPanel(Panel.DETAIL);
-            }
-        } else if (panel() == Panel.DETAIL) {
-            if (closeButton.contains(x, y)) openPanel(Panel.NONE);
-            else if (returnCodexButton.contains(x, y)) {
-                openPanel(Panel.CODEX);
-            }
+            int index = CodexLayout.hitTest(x, y, codexScroll, entries.size());
+            if (index >= 0) activate(ID_ENTRY + entries.get(index));
         }
         return true;
     }
@@ -700,11 +999,23 @@ public final class FishingView extends View {
             else closeButton.set(1152, 70, 1210, 124);
         }
         if (next == Panel.CODEX) entriesDirty = true;
+        if (next == Panel.DETAIL) {
+            codexDirty = true;
+        } else if (next != Panel.NONE) {
+            // A closing panel still draws the detail layer until its fade ends, so the cache is
+            // only released here for transitions that immediately switch to another panel.
+            releaseCodexCache();
+        }
         updateContentDescription(next);
+        accessibility.rebuild();
         syncPause();
     }
 
     private void updateContentDescription(Panel panel) {
+        if (rotatePrompt) {
+            setContentDescription(getResources().getString(R.string.content_rotate_prompt));
+            return;
+        }
         int description;
         switch (panel) {
             case SCENES:

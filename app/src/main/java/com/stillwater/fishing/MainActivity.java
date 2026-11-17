@@ -1,5 +1,6 @@
 package com.stillwater.fishing;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.os.Build;
 import android.os.Bundle;
@@ -54,6 +55,9 @@ public final class MainActivity extends Activity implements FishingEngine.Listen
         super.onPause();
     }
 
+    // Predictive back is already routed through the API 33+ callback registered in onCreate.
+    // This override only serves API 26-32; lint does not model the per-activity opt-in.
+    @SuppressLint("GestureBackNavigation")
     @Override
     public void onBackPressed() {
         handleBack();
