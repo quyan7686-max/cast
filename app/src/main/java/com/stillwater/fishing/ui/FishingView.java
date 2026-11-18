@@ -45,6 +45,9 @@ public final class FishingView extends View {
     private final Paint paint = new Paint();
     private final ArtRepository art;
     private final VisualMotion motion = new VisualMotion();
+    private final Bitmap worldFrame = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888);
+    private final Canvas worldCanvas = new Canvas(worldFrame);
+    private final Rect worldDestination = new Rect(0, 0, 1280, 720);
     private final RectF panelBounds = new RectF();
     private final RectF[] sceneCards = new RectF[6];
     private final RectF thumbnailBounds = new RectF();
@@ -59,7 +62,7 @@ public final class FishingView extends View {
     private final RectF sceneButton = new RectF(910, 24, 1030, 82);
     private final RectF codexButton = new RectF(1042, 24, 1162, 82);
     private final RectF helpButton = new RectF(1174, 24, 1256, 82);
-    private final RectF fishButton = new RectF(1030, 548, 1200, 694);
+    private final RectF fishButton = new RectF(1026, 570, 1238, 698);
     private final RectF closeButton = new RectF(1152, 70, 1210, 124);
     private boolean foreground, windowFocused = true;
     private boolean rotatePrompt;
@@ -76,7 +79,7 @@ public final class FishingView extends View {
     private final List<Integer> codexEntries = new ArrayList<>();
     private boolean entriesDirty = true;
     private boolean codexDrag;
-    private final RectF fishBody = new RectF(1043, 561, 1187, 681);
+    private final RectF fishBody = new RectF(1038, 584, 1226, 684);
     private final RectF confirmSceneButton = new RectF(890, 555, 1135, 620);
     private final RectF continueButton = new RectF(140, 555, 365, 620);
     private final RectF returnCodexButton = new RectF(445, 590, 835, 635);
@@ -219,7 +222,16 @@ public final class FishingView extends View {
         canvas.save();
         canvas.translate(viewport.getOffsetX(), viewport.getOffsetY());
         canvas.scale(viewport.getScale(), viewport.getScale());
-        drawWorld(canvas);
+        // Rasterize every world layer together before nearest-neighbor display scaling.
+        worldCanvas.save();
+        worldCanvas.scale(.25f, .25f);
+        drawWorld(worldCanvas);
+        worldCanvas.restore();
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(255);
+        paint.setFilterBitmap(false);
+        paint.setColorFilter(null);
+        canvas.drawBitmap(worldFrame, null, worldDestination, paint);
         drawHeader(canvas);
         drawFishingButton(canvas);
         drawMessage(canvas);
@@ -241,7 +253,9 @@ public final class FishingView extends View {
             canvas.restoreToCount(checkpoint);
         }
         canvas.restore();
-        if (foreground && windowFocused && !rotatePrompt) postInvalidateOnAnimation();
+        // Sprite poses run at 4-12 fps. A 30 fps scene avoids continuously saturating
+        // the UI queue while preserving responsive input and time-based deadlines.
+        if (foreground && windowFocused && !rotatePrompt) postInvalidateDelayed(33);
     }
 
     /**
@@ -270,7 +284,9 @@ public final class FishingView extends View {
 
     private void observeFishingState() {
         FishingEngine.State current = engine.getState();
-        if (current == FishingEngine.State.WAITING && drawnState != current) motion.cast();
+        if (current == FishingEngine.State.WAITING && drawnState == FishingEngine.State.IDLE) motion.cast();
+        if (current == FishingEngine.State.IDLE && drawnState != FishingEngine.State.IDLE) motion.reel();
+        if (drawnState != current) accessibility.rebuild();
         drawnState = current;
     }
 
@@ -287,14 +303,14 @@ public final class FishingView extends View {
         } else {
             art.drawScene(canvas, paint, scene, period, rain, motion.waterSeconds);
         }
-        art.drawAngler(canvas, paint, engine.getState(), motion.waterSeconds,
+        art.drawAngler(canvas, paint, scene, engine.getState(), motion.waterSeconds,
                 motion.waterSeconds - motion.castAt, motion.waterSeconds - motion.biteAt,
-                motion.waterSeconds - motion.catchAt);
+                motion.waterSeconds - motion.catchAt, motion.waterSeconds - motion.reelAt);
         float catchProgress = VisualMotion.progress(motion.waterSeconds, motion.catchAt, .55);
         if (displayedCatch != null && catchProgress < 1) {
             float p = VisualMotion.easeOut(catchProgress);
-            float x = ArtRepository.FLOAT_X - 325 * p;
-            float y = ArtRepository.FLOAT_Y - 115 * p - 90 * (float) Math.sin(p * Math.PI);
+            float x = (scene == 0 ? PondArt.FLOAT_X : ArtRepository.FLOAT_X) - (scene == 0 ? PondArt.FLOAT_X - 416 : 325) * p;
+            float y = (scene == 0 ? PondArt.FLOAT_Y : ArtRepository.FLOAT_Y) - (scene == 0 ? PondArt.FLOAT_Y - 388 : 115) * p - 90 * (float) Math.sin(p * Math.PI);
             int layer = canvas.saveLayerAlpha(330, 270, 800, 600, Math.round(255 * (1 - catchProgress)));
             canvas.rotate(-16 * p, x, y);
             art.drawSpecimen(canvas, paint, displayedCatch.species, displayedCatch.shiny, false, x, y, .65f);
@@ -328,13 +344,12 @@ public final class FishingView extends View {
     }
 
     private void drawHeader(Canvas c) {
-        panel(c, 20, 20, 338, 105, 0xE61A3138);
-        text(c, getResources().getString(R.string.app_name), 40, 61, 32, 0xFFF8EFD7, true);
-        text(c, Catalog.SCENES[engine.getProgress().sceneIndex] + "  ·  "
-                + getResources().getString(R.string.tagline), 41, 89, 16, 0xFFB9D3C8, false);
-        panel(c, 535, 25, 745, 80, 0xD9183138);
-        text(c, clockText,
-                640, 60, 20, 0xFFF5EDDA, true, Paint.Align.CENTER);
+        panel(c, 20, 20, 264, 112, 0xFF193544);
+        text(c, getResources().getString(R.string.app_name), 142, 63, 34, 0xFFFFE8AF, true, Paint.Align.CENTER);
+        text(c, "·  " + Catalog.SCENES[engine.getProgress().sceneIndex] + "  ·",
+                142, 94, 19, 0xFFD4C995, true, Paint.Align.CENTER);
+        panel(c, 24, 644, 286, 696, 0xFF193544);
+        text(c, clockText, 155, 677, 19, 0xFFEFDEAF, true, Paint.Align.CENTER);
         button(c, sceneButton, getResources().getString(R.string.action_scenes), false);
         button(c, codexButton, codexLabel, false);
         button(c, helpButton, getResources().getString(R.string.action_help), false);
@@ -366,14 +381,14 @@ public final class FishingView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0x44202E2F);
         c.drawRect(body.left + 3, body.top + 6, body.right + 3, body.bottom + 6, paint);
-        art.drawPanel(c, paint, body, biting ? "gold" : "slot");
+        art.drawPanel(c, paint, body, "gold");
         text(c, getResources().getString(engine.getState() == FishingEngine.State.IDLE
                         ? R.string.action_cast : R.string.action_reel),
                 body.centerX(), body.centerY() + 12, 34, 0xFF19343A, true, Paint.Align.CENTER);
         c.restore();
         String hint = getResources().getString(engine.getState() == FishingEngine.State.IDLE
                 ? R.string.hint_idle : biting ? R.string.hint_biting : R.string.hint_waiting);
-        text(c, hint, 1115, 530, 17, biting ? 0xFFFFF0B2 : 0xFFF1F3DE, true, Paint.Align.CENTER);
+        text(c, hint, fishBody.centerX(), 554, 17, biting ? 0xFFFFF0B2 : 0xFFF1F3DE, true, Paint.Align.CENTER);
     }
 
     private void drawMessage(Canvas c) {
@@ -670,6 +685,7 @@ public final class FishingView extends View {
                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                 engine.press(System.currentTimeMillis());
                 observeFishingState();
+                invalidate();
             } else if (id == ID_SCENES) openPanel(Panel.SCENES);
             else if (id == ID_CODEX) openPanel(Panel.CODEX);
             else if (id == ID_HELP) openPanel(Panel.HELP);

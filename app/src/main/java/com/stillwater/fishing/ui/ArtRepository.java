@@ -25,6 +25,7 @@ import java.util.Map;
 public final class ArtRepository {
     static final float FLOAT_X = 720, FLOAT_Y = 536, WATERLINE = 544;
     private final AssetManager assets;
+    private final PondArt pond;
     private final Map<String, Bitmap> bitmaps = new HashMap<>();
     private final Path fishingLine = new Path();
     private final String[] sceneNames = new String[6];
@@ -36,6 +37,7 @@ public final class ArtRepository {
 
     public ArtRepository(Context context) {
         assets = context.getAssets();
+        pond = new PondArt(context);
         for (int i = 0; i < sceneNames.length; i++) sceneNames[i] = "scene_" + i;
         for (int i = 0; i < specimenNames.length; i++) {
             String base = String.format(Locale.US, "species_%02d", i);
@@ -75,6 +77,7 @@ public final class ArtRepository {
 
     public void drawScene(Canvas canvas, Paint paint, int scene, int period, boolean raining, double time) {
         prepare(paint);
+        if (scene == 0) { pond.background(canvas, paint, period, raining, time); return; }
         destination.set(0, 0, 1280, 720);
         canvas.drawBitmap(bitmap(sceneNames[scene]), null, destination, paint);
         if (period == 0) {
@@ -184,9 +187,10 @@ public final class ArtRepository {
         paint.setStyle(Paint.Style.FILL);
     }
 
-    public void drawAngler(Canvas canvas, Paint paint, FishingEngine.State state, double time,
-                           double castAge, double biteAge, double catchAge) {
+    public void drawAngler(Canvas canvas, Paint paint, int scene, FishingEngine.State state, double time,
+                           double castAge, double biteAge, double catchAge, double reelAge) {
         prepare(paint);
+        if (scene == 0) { pond.actor(canvas, paint, state, time, castAge, biteAge, catchAge, reelAge, this); return; }
         boolean biting = state == FishingEngine.State.BITING;
         boolean casting = state == FishingEngine.State.WAITING && castAge < .62;
         float cast = VisualMotion.progress(castAge, 0, .62);
@@ -284,6 +288,7 @@ public final class ArtRepository {
 
     public void drawSceneThumbnail(Canvas canvas, Paint paint, int scene, RectF target) {
         prepare(paint);
+        if (scene == 0) { pond.thumbnail(canvas, paint, target); return; }
         float targetAspect = target.width() / target.height();
         if (targetAspect > 320f / 180f) {
             int height = Math.round(320 / targetAspect);
@@ -297,20 +302,20 @@ public final class ArtRepository {
 
     public void drawPanel(Canvas canvas, Paint paint, RectF target, String style) {
         prepare(paint);
-        Bitmap bitmap = bitmap("ui_" + style);
-        float border = Math.min(18, Math.min(target.width(), target.height()) / 4);
-        for (int row = 0; row < 3; row++) {
-            for (int column = 0; column < 3; column++) {
-                int sx = column * 16, sy = row * 16;
-                // Atlas cells include transparent gutters; stretching them creates open seams.
-                source.set(sx, sy, sx + (column == 2 ? 14 : 15), sy + 15);
-                float left = column == 0 ? target.left : column == 1 ? target.left + border : target.right - border;
-                float right = column == 0 ? target.left + border : column == 1 ? target.right - border : target.right;
-                float top = row == 0 ? target.top : row == 1 ? target.top + border : target.bottom - border;
-                float bottom = row == 0 ? target.top + border : row == 1 ? target.bottom - border : target.bottom;
-                destination.set(left, top, right, bottom);
-                canvas.drawBitmap(bitmap, source, destination, paint);
-            }
-        }
+        boolean dark = style.equals("dark"), gold = style.equals("gold");
+        float l = target.left, t = target.top, r = target.right, b = target.bottom;
+        float unit = Math.min(4, Math.min(target.width(), target.height()) / 10);
+        // Stepped corners and solid color bands share the scene's pixel scale.
+        paint.setColor(0xFF102832);
+        canvas.drawRect(l + unit, t, r - unit, b, paint);
+        canvas.drawRect(l, t + unit, r, b - unit, paint);
+        paint.setColor(dark ? 0xFFE5BA68 : 0xFF987047);
+        canvas.drawRect(l + unit, t + unit, r - unit, b - unit, paint);
+        paint.setColor(dark ? 0xFF193544 : gold ? 0xFFE9BD6B : 0xFFF0DEB4);
+        canvas.drawRect(l + unit * 2, t + unit * 2, r - unit * 2, b - unit * 2, paint);
+        paint.setColor(dark ? 0xFF294654 : gold ? 0xFFFFDB91 : 0xFFFFEDC8);
+        canvas.drawRect(l + unit * 3, t + unit * 2, r - unit * 3, t + unit * 3, paint);
+        paint.setColor(dark ? 0xFF102A37 : gold ? 0xFFBC8949 : 0xFFD2B98C);
+        canvas.drawRect(l + unit * 3, b - unit * 3, r - unit * 3, b - unit * 2, paint);
     }
 }

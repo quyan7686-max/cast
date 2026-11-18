@@ -6,7 +6,7 @@ final class VisualMotion {
     private boolean initialized;
     double uiSeconds;
     double waterSeconds;
-    double castAt = -100, biteAt = -100, catchAt = -100;
+    double castAt = -100, biteAt = -100, catchAt = -100, reelAt = -100;
 
     void frame(long now, boolean visible, boolean fishingPaused) {
         if (!initialized) {
@@ -26,7 +26,8 @@ final class VisualMotion {
 
     void cast() { castAt = waterSeconds; }
     void bite() { biteAt = waterSeconds; }
-    void caught() { catchAt = waterSeconds; }
+    void caught() { catchAt = waterSeconds; reel(); }
+    void reel() { reelAt = waterSeconds; }
 
     static float progress(double now, double start, double duration) {
         return (float) Math.max(0, Math.min(1, (now - start) / duration));
